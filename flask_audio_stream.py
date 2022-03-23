@@ -1,16 +1,23 @@
 from flask import Flask, Response,render_template
 import pyaudio
+from scipy.io.wavfile import write
+import numpy as np
+from threading import Thread
+from time import time
+
 
 app = Flask(__name__)
 
 
 FORMAT = pyaudio.paInt16
 RATE = 44100
-CHUNK = 1024
+#CHUNK_SIZE = 1024
+CHUNK_SIZE = RATE
 RECORD_SECONDS = 1
 bitsPerSample = 16
 CHANNELS = 1
 audio1 = pyaudio.PyAudio()
+outdir = 'audio_cache/'
 
 
 def genHeader(sampleRate, bitsPerSample, channels):
@@ -31,23 +38,32 @@ def genHeader(sampleRate, bitsPerSample, channels):
     return header
 
 
+def save_chunk(chunk, timestamp):
+    filename = '%s%s_input_microphone.wav' % (outdir, timestamp)
+    numpydata = np.frombuffer(chunk, dtype=np.int16)
+    #print(numpydata)
+    write(filename, RATE, numpydata)
+
+
 @app.route('/audio')
 def audio():
     def sound():
-        wav_header = genHeader(RATE, bitsPerSample, CHANNELS)
-        stream = audio1.open(format=FORMAT, channels=CHANNELS,
-                        rate=RATE, input=True,input_device_index=1,
-                        frames_per_buffer=CHUNK)
+        stream = audio1.open(format=FORMAT, channels=CHANNELS, rate=RATE, input=True,input_device_index=1, frames_per_buffer=CHUNK_SIZE)
         print("recording...")
         first_run = True
         while True:
-           if first_run:
-               data = wav_header + stream.read(CHUNK)
-               first_run = False
-           else:
-               data = stream.read(CHUNK)
-           yield(data)
+            chunk = stream.read(CHUNK_SIZE)
+            if first_run:
+                wav_header = genHeader(RATE, bitsPerSample, CHANNELS)
+                data = wav_header + chunk
+                first_run = False
+            else:
+                data = chunk
+            save_thread = Thread(target=save_chunk, args=(chunk, time()))
+            save_thread.start()
+            yield(data)
     return Response(sound())
+
 
 @app.route('/')
 def index():
